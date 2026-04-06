@@ -83,10 +83,6 @@ RUN useradd -m -s /bin/bash gcagent \
 
 USER gcagent
 
-# Dolt identity (required by bd init, not used for commits).
-RUN dolt config --global --add user.name "gcagent" \
-    && dolt config --global --add user.email "gcagent@gascity.local"
-
 # Claude Code (native installer).
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
