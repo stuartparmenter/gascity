@@ -59,6 +59,7 @@ apt-get update && apt-get install -y --no-install-recommends \
     fzf \
     libicu76 \
     openssh-client \
+    python3 \
     ripgrep \
     zsh
 rm -rf /var/lib/apt/lists/*
