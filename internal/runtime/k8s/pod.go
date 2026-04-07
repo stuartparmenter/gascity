@@ -77,7 +77,18 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 			linuxUsername,
 		)
 	}
-	credCopy := `mkdir -p $HOME/.claude && cp -rL /tmp/claude-secret/. $HOME/.claude/ 2>/dev/null; git config --global --add safe.directory '*' 2>/dev/null; `
+	// Copy credentials from the mounted secret, trust the workspace directory
+	// so Claude Code skips the interactive trust dialog, and mark git dirs safe.
+	// Base64-encode podWorkDir to avoid shell metacharacter injection.
+	workDirB64 := base64.StdEncoding.EncodeToString([]byte(podWorkDir))
+	trustPatch := fmt.Sprintf(
+		`DIR=$(echo '%s' | base64 -d) && `+
+			`if [ -f $HOME/.claude/.claude.json ] && command -v jq >/dev/null 2>&1; then `+
+			`jq --arg dir "$DIR" '.projects[$dir].hasTrustDialogAccepted = true' $HOME/.claude/.claude.json > $HOME/.claude/.claude.json.tmp && `+
+			`mv $HOME/.claude/.claude.json.tmp $HOME/.claude/.claude.json; fi; `,
+		workDirB64,
+	)
+	credCopy := `mkdir -p $HOME/.claude && cp -rL /tmp/claude-secret/. $HOME/.claude/ 2>/dev/null; git config --global --add safe.directory '*' 2>/dev/null; ` + trustPatch
 	wsWait := ""
 	if !p.prebaked {
 		wsWait = `while [ ! -f /workspace/.gc-workspace-ready ]; do sleep 0.5; done; `
