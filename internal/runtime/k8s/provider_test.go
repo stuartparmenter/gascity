@@ -720,12 +720,12 @@ func TestBuildPodEnvRemapsVars(t *testing.T) {
 		t.Errorf("GC_TMUX_SESSION = %q, want main", envMap["GC_TMUX_SESSION"])
 	}
 
-	// GC_K8S_DOLT_* defaults should be injected when not in config.
-	if envMap["GC_K8S_DOLT_HOST"] != "dolt.gc.svc.cluster.local" {
-		t.Errorf("GC_K8S_DOLT_HOST = %q, want dolt.gc.svc.cluster.local", envMap["GC_K8S_DOLT_HOST"])
+	// GC_K8S_DOLT_* should NOT be injected when not configured — no defaults.
+	if envMap["GC_K8S_DOLT_HOST"] != "" {
+		t.Errorf("GC_K8S_DOLT_HOST = %q, want empty (no default)", envMap["GC_K8S_DOLT_HOST"])
 	}
-	if envMap["GC_K8S_DOLT_PORT"] != "3307" {
-		t.Errorf("GC_K8S_DOLT_PORT = %q, want 3307", envMap["GC_K8S_DOLT_PORT"])
+	if envMap["GC_K8S_DOLT_PORT"] != "" {
+		t.Errorf("GC_K8S_DOLT_PORT = %q, want empty (no default)", envMap["GC_K8S_DOLT_PORT"])
 	}
 }
 

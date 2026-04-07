@@ -338,16 +338,30 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir string) []corev1.EnvVar {
 	for _, e := range env {
 		envMap[e.Name] = true
 	}
-	if !envMap["GC_K8S_DOLT_HOST"] {
-		env = append(env, corev1.EnvVar{
-			Name: "GC_K8S_DOLT_HOST", Value: "dolt.gc.svc.cluster.local",
-		})
+	// Inject Dolt connection info for agent-side bd operations.
+	// GC_K8S_DOLT_HOST/PORT are the source of truth in K8s deployments.
+	// BEADS_DOLT_SERVER_HOST/PORT are what bd actually reads.
+	doltHost := cfgEnv["GC_K8S_DOLT_HOST"]
+	doltPort := cfgEnv["GC_K8S_DOLT_PORT"]
+	if doltHost != "" {
+		if !envMap["GC_K8S_DOLT_HOST"] {
+			env = append(env, corev1.EnvVar{Name: "GC_K8S_DOLT_HOST", Value: doltHost})
+		}
+		env = append(env, corev1.EnvVar{Name: "BEADS_DOLT_SERVER_HOST", Value: doltHost})
 	}
-	if !envMap["GC_K8S_DOLT_PORT"] {
-		env = append(env, corev1.EnvVar{
-			Name: "GC_K8S_DOLT_PORT", Value: "3307",
-		})
+	if doltPort != "" {
+		if !envMap["GC_K8S_DOLT_PORT"] {
+			env = append(env, corev1.EnvVar{Name: "GC_K8S_DOLT_PORT", Value: doltPort})
+		}
+		env = append(env, corev1.EnvVar{Name: "BEADS_DOLT_SERVER_PORT", Value: doltPort})
 	}
+	// Agent pods connect to the shared in-cluster Dolt server — they don't
+	// run their own. GC_DOLT=skip tells gc init to create a minimal .beads/
+	// scaffold (metadata.json + config.yaml with auto-start: false) without
+	// trying to start a local Dolt server. initBeadsInPod then patches the
+	// scaffold with the correct Dolt service endpoint. After that, the
+	// agent's bd CLI uses metadata.json to reach the shared server directly.
+	env = append(env, corev1.EnvVar{Name: "GC_DOLT", Value: "skip"})
 
 	// Inject GITHUB_TOKEN from optional K8s secret for git push in pods.
 	env = append(env, corev1.EnvVar{
