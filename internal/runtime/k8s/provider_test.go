@@ -867,7 +867,8 @@ func TestInitBeadsInPod(t *testing.T) {
 		},
 	}
 
-	err := initBeadsInPod(context.Background(), fake, "gc-test-pod", cfg, "/workspace/demo-repo")
+	// Test a rig agent (workDir outside /workspace) to verify rig-root init.
+	err := initBeadsInPod(context.Background(), fake, "gc-test-pod", cfg, "/rigs/demo-repo")
 	if err != nil {
 		t.Fatalf("initBeadsInPod: %v", err)
 	}
@@ -880,11 +881,11 @@ func TestInitBeadsInPod(t *testing.T) {
 		if c.method == "execInPod" && len(c.cmd) >= 3 {
 			if c.cmd[0] == "sh" && c.cmd[1] == "-c" {
 				script := c.cmd[2]
-				// The script uses base64-encoded values. Verify they decode correctly.
+				// Rig agent inits at rig root with rig-derived prefix.
 				if containsStr(script, "bd init --server") &&
 					containsStr(script, "--skip-agents") &&
 					containsStr(script, "base64 -d") &&
-					scriptContainsB64(script, "/workspace/demo-repo") &&
+					scriptContainsB64(script, "/rigs/demo-repo") &&
 					scriptContainsB64(script, "dolt.gc.svc.cluster.local") &&
 					scriptContainsB64(script, "3307") &&
 					scriptContainsB64(script, "dr") {
@@ -906,9 +907,10 @@ func TestInitBeadsInPodPrefixDerivation(t *testing.T) {
 		workDir    string
 		wantPrefix string
 	}{
-		{"/workspace/demo-repo", "dr"},
-		{"/workspace/tower-of-hanoi", "toh"},
-		{"/workspace/simple", "s"},
+		// Rig agents (separate path) init at rig root → prefix from rig name.
+		{"/rigs/demo-repo", "dr"},
+		{"/rigs/tower-of-hanoi", "toh"},
+		{"/rigs/simple", "s"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.workDir, func(t *testing.T) {
@@ -946,19 +948,19 @@ func TestInitBeadsInPodPrefixFromEnv(t *testing.T) {
 		{
 			name:       "env prefix overrides directory derivation",
 			envPrefix:  "bl",
-			workDir:    "/workspace/polecat",
+			workDir:    "/rigs/polecat",
 			wantPrefix: "bl",
 		},
 		{
 			name:       "env prefix overrides hyphenated directory",
 			envPrefix:  "hw",
-			workDir:    "/workspace/demo-repo",
+			workDir:    "/rigs/demo-repo",
 			wantPrefix: "hw",
 		},
 		{
 			name:       "falls back to directory derivation when env empty",
 			envPrefix:  "",
-			workDir:    "/workspace/demo-repo",
+			workDir:    "/rigs/demo-repo",
 			wantPrefix: "dr",
 		},
 	}
@@ -1046,6 +1048,9 @@ func TestInitBeadsInPodWritesPortFile(t *testing.T) {
 }
 
 func TestInitBeadsInPodSetsIssuePrefix(t *testing.T) {
+	// issue_prefix is only set for rig agents (outside /workspace) which have
+	// their own .beads/. City agents share /workspace/.beads/ — setting prefix
+	// per-agent would cause conflicts when multiple rigs exist.
 	fake := newFakeK8sOps()
 	cfg := runtime.Config{
 		Env: map[string]string{
@@ -1054,7 +1059,7 @@ func TestInitBeadsInPodSetsIssuePrefix(t *testing.T) {
 			"GC_BEADS_PREFIX":  "bl",
 		},
 	}
-	_ = initBeadsInPod(context.Background(), fake, "test-pod", cfg, "/workspace/brewlife")
+	_ = initBeadsInPod(context.Background(), fake, "test-pod", cfg, "/rigs/brewlife")
 
 	found := false
 	for _, c := range fake.calls {
