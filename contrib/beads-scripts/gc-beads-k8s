@@ -54,11 +54,24 @@ KUBECTL+=(-n "$NS")
 
 # --- Helpers ---
 
+# ensure_prefix switches the runner's active issue_prefix to match
+# GC_BEADS_PREFIX. Skipped when the env var is unset (backwards compat).
+# The prefix is cached to avoid redundant config-set calls.
+# Uses kubectl exec directly to avoid recursion with run_bd.
+_active_prefix=""
+ensure_prefix() {
+  local want="${GC_BEADS_PREFIX:-}"
+  [ -z "$want" ] && return
+  [ "$want" = "$_active_prefix" ] && return
+  "${KUBECTL[@]}" exec "$POD_NAME" -- bd config set issue_prefix "$want" >/dev/null 2>&1 || true
+  _active_prefix="$want"
+}
+
 # run_bd executes bd inside the beads runner pod.
-run_bd() { "${KUBECTL[@]}" exec "$POD_NAME" -- bd "$@"; }
+run_bd() { ensure_prefix; "${KUBECTL[@]}" exec "$POD_NAME" -- bd "$@"; }
 
 # run_bd_stdin executes bd inside the beads runner pod with stdin piped through.
-run_bd_stdin() { "${KUBECTL[@]}" exec -i "$POD_NAME" -- bd "$@"; }
+run_bd_stdin() { ensure_prefix; "${KUBECTL[@]}" exec -i "$POD_NAME" -- bd "$@"; }
 
 # bd_to_gc converts a single bd JSON object to Gas City wire format.
 # bd uses "issue_type" where Gas City uses "type".
@@ -193,6 +206,8 @@ case "$op" in
       run_bd init --server --server-host "$DOLT_HOST" --server-port "$DOLT_PORT" \
         -p gc --skip-hooks >/dev/null 2>&1
       run_bd config set issue_prefix gc >/dev/null 2>&1
+      custom_types="${GC_BEADS_CUSTOM_TYPES:-molecule,convoy,message,event,gate,merge-request,agent,role,rig,session,spec,nudge}"
+      run_bd config set types.custom "$custom_types" >/dev/null 2>&1
     fi
     ;;
 
@@ -208,6 +223,11 @@ case "$op" in
     run_bd init --server --server-host "$DOLT_HOST" --server-port "$DOLT_PORT" \
       -p "$prefix" --skip-hooks >/dev/null 2>&1 || true
     run_bd config set issue_prefix "$prefix" >/dev/null 2>&1 || true
+    # Register custom bead types required by Gas City (mirrors gc-beads-bd
+    # and doctor.RequiredCustomTypes). Without this, bd rejects creates for
+    # types like "session" that aren't in the default set.
+    custom_types="${GC_BEADS_CUSTOM_TYPES:-molecule,convoy,message,event,gate,merge-request,agent,role,rig,session,spec,nudge}"
+    run_bd config set types.custom "$custom_types" >/dev/null 2>&1 || true
     ;;
 
   config-set)
