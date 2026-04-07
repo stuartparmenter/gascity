@@ -36,6 +36,7 @@ type Provider struct {
 	memRequest      string
 	cpuLimit        string
 	memLimit        string
+	serviceAccount  string        // pod service account name (GC_K8S_SERVICE_ACCOUNT)
 	prebaked        bool          // skip staging + init container for prebaked images
 	podSecurity     string        // "restricted", "baseline", or "" (none)
 	postStartSettle time.Duration // settle time before post-start liveness check
@@ -48,6 +49,7 @@ type Provider struct {
 //   - GC_K8S_NAMESPACE — namespace (default: "gc")
 //   - GC_K8S_IMAGE — container image (required for Start)
 //   - GC_K8S_CONTEXT — kubectl context (default: current)
+//   - GC_K8S_SERVICE_ACCOUNT — pod service account name (default: namespace default)
 //   - GC_K8S_CPU_REQUEST, GC_K8S_MEM_REQUEST — resource requests
 //   - GC_K8S_CPU_LIMIT, GC_K8S_MEM_LIMIT — resource limits
 //   - GC_K8S_POD_SECURITY — pod security profile ("restricted", "baseline", "")
@@ -82,6 +84,7 @@ func NewProvider(cfg config.K8sConfig) (*Provider, error) {
 		memRequest:      envOrDefault("GC_K8S_MEM_REQUEST", cfgOrDefault(cfg.MemRequest, "1Gi")),
 		cpuLimit:        envOrDefault("GC_K8S_CPU_LIMIT", cfgOrDefault(cfg.CPULimit, "2")),
 		memLimit:        envOrDefault("GC_K8S_MEM_LIMIT", cfgOrDefault(cfg.MemLimit, "4Gi")),
+		serviceAccount:  os.Getenv("GC_K8S_SERVICE_ACCOUNT"),
 		prebaked:        os.Getenv("GC_K8S_PREBAKED") == "true" || cfg.Prebaked,
 		podSecurity:     envOrDefault("GC_K8S_POD_SECURITY", cfg.PodSecurity),
 		postStartSettle: 3 * time.Second,
