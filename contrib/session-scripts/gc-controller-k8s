@@ -299,8 +299,10 @@ case "$op" in
     echo "Initializing beads on controller..."
     init_controller_beads "$city_path/city.toml"
 
-    # Create the beads runner pod (gc-beads-k8s uses it for bd operations).
+    # Recreate beads runner pod to pick up latest image.
     echo "Starting beads runner..."
+    GC_K8S_NAMESPACE="$NS" GC_K8S_IMAGE="$AGENT_IMAGE" \
+      "$(dirname "$0")/../beads-scripts/gc-beads-k8s" shutdown 2>/dev/null || true
     GC_K8S_NAMESPACE="$NS" GC_K8S_IMAGE="$AGENT_IMAGE" \
       "$(dirname "$0")/../beads-scripts/gc-beads-k8s" ensure-ready
 
