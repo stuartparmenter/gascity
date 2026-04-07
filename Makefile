@@ -10,6 +10,7 @@ GOLANGCI_LINT := $(BIN_DIR)/golangci-lint
 BINARY     := gc
 BUILD_DIR  := bin
 INSTALL_DIR := $(BIN_DIR)
+ENABLE_SFW ?= false
 
 # Version metadata injected via ldflags.
 VERSION    := $(shell tag=$$(git describe --tags --exact-match 2>/dev/null || true); if [ -n "$$tag" ]; then printf '%s' "$$tag" | sed 's/^v//'; else echo "dev"; fi)
@@ -20,7 +21,7 @@ LDFLAGS := -X main.version=$(VERSION) \
            -X main.commit=$(COMMIT) \
            -X main.date=$(BUILD_TIME)
 
-.PHONY: build check check-all check-bd check-docker check-docs check-dolt lint fmt-check fmt vet test test-acceptance test-acceptance-b test-acceptance-c test-acceptance-all test-tutorial-regression test-tutorial test-integration test-mcp-mail test-docker test-k8s test-cover cover install install-tools install-buildx setup clean generate check-schema docker-base docker-agent docker-controller docs-dev
+.PHONY: build check check-all check-bd check-docker check-docs check-dolt lint fmt-check fmt vet test test-acceptance test-acceptance-b test-acceptance-c test-acceptance-all test-tutorial-regression test-tutorial test-integration test-mcp-mail test-docker test-k8s test-cover cover install install-tools install-buildx setup clean generate check-schema docker-base docker-agent docker-controller docker-mail docker-load docs-dev
 
 ## build: compile gc binary with version metadata
 build:
@@ -189,13 +190,24 @@ setup: install-tools
 docs-dev:
 	cd docs && npx --yes mint@latest dev
 
-## docker-base: build base image with system dependencies (~2.5 min, rebuild rarely)
-docker-base: check-docker
-	docker build -f contrib/k8s/Dockerfile.base -t gc-agent-base:latest .
+# Source pinned dependency versions for Docker builds.
+include deps.env
+export
 
-## docker-agent: build base agent image (~5s on top of base). For prebaked images use: gc build-image
+## docker-base: build base image with system dependencies (~2.5 min, rebuild rarely)
+## Pass ENABLE_SFW=true to include Socket Firewall (default: false)
+docker-base: check-docker
+	docker build -f contrib/k8s/Dockerfile.base \
+		--build-arg DOLT_VERSION=$(DOLT_VERSION) \
+		--build-arg ENABLE_SFW=$(ENABLE_SFW) \
+		-t gc-agent-base:latest .
+
+## docker-agent: build base agent image. For prebaked images use: gc build-image
 docker-agent: check-docker
-	docker build -f contrib/k8s/Dockerfile.agent -t gc-agent:latest .
+	docker build -f contrib/k8s/Dockerfile.agent \
+		--build-arg BEADS_VERSION=$(BD_COMMIT) \
+		--build-arg BR_VERSION=v$(BR_VERSION) \
+		-t gc-agent:latest .
 	@if kubectl config current-context 2>/dev/null | grep -q '^kind-'; then \
 		cluster=$$(kubectl config current-context | sed 's/^kind-//'); \
 		echo "Loading gc-agent:latest into kind cluster '$$cluster'..."; \
@@ -210,6 +222,18 @@ docker-controller: check-docker
 		echo "Loading gc-controller:latest into kind cluster '$$cluster'..."; \
 		kind load docker-image gc-controller:latest --name "$$cluster"; \
 	fi
+
+## docker-mail: build mcp-agent-mail image
+docker-mail: check-docker
+	docker build -f contrib/k8s/Dockerfile.mail -t gc-mcp-mail:latest .
+
+## docker-load: load all gc images into the k8s node (Docker Desktop kind provisioner)
+docker-load: check-docker
+	@for img in gc-agent-base:latest gc-agent:latest gc-controller:latest gc-mcp-mail:latest; do \
+		echo "Loading $$img into k8s node..."; \
+		docker save "$$img" | docker exec -i desktop-control-plane ctr -n k8s.io images import - 2>/dev/null || true; \
+	done
+	@echo "All images loaded."
 
 ## k8s-secret: create K8s secret with Claude credentials
 ## Usage: make k8s-secret CLAUDE_CONFIG_SRC=~/.claude [GC_K8S_NAMESPACE=gc]
