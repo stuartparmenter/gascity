@@ -3,7 +3,6 @@ package k8s
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -707,59 +706,61 @@ func initBeadsInPod(ctx context.Context, ops k8sOps, podName string, cfg runtime
 		doltPort = "3307"
 	}
 
-	// Derive rig prefix from rig directory name: split on hyphens, first letter
-	// of each part (e.g., "demo-repo" → "dr"). Same algorithm as gc-controller-k8s
-	// and mock scripts.
-	rigName := workDir
-	if i := strings.LastIndex(rigName, "/"); i >= 0 {
-		rigName = rigName[i+1:]
+	// Determine where to init .beads/.
+	// City agents (workDir under /workspace) use the city-root /workspace.
+	// Rig agents (workDir is a separate rig path) use their rig root.
+	// bd walks up directories to find .beads/, so creating one in an agent's
+	// subdirectory (e.g. /workspace/.gc/agents/foo/) would shadow the
+	// city-root .beads/ and the agent would never see routed work beads.
+	initDir := "/workspace"
+	isRig := workDir != "/workspace" && !strings.HasPrefix(workDir, "/workspace/")
+	if isRig {
+		initDir = workDir
 	}
-	var prefix strings.Builder
-	for _, part := range strings.Split(rigName, "-") {
-		if len(part) > 0 {
-			prefix.WriteByte(part[0])
+	initDirB64 := base64.StdEncoding.EncodeToString([]byte(initDir))
+	doltHostB64 := base64.StdEncoding.EncodeToString([]byte(doltHost))
+	doltPortB64 := base64.StdEncoding.EncodeToString([]byte(doltPort))
+
+	var patchCmd string
+	if isRig {
+		// Rig agents: derive prefix from rig dir name and do a full bd init.
+		dirName := initDir
+		if i := strings.LastIndex(dirName, "/"); i >= 0 {
+			dirName = dirName[i+1:]
 		}
+		var prefix strings.Builder
+		for _, part := range strings.Split(dirName, "-") {
+			if len(part) > 0 {
+				prefix.WriteByte(part[0])
+			}
+		}
+		prefixB64 := base64.StdEncoding.EncodeToString([]byte(prefix.String()))
+		patchCmd = fmt.Sprintf(
+			`INITDIR=$(echo '%s' | base64 -d) && cd "$INITDIR" && `+
+				`rm -rf .beads && `+
+				`PREFIX=$(echo '%s' | base64 -d) && `+
+				`DOLT_HOST=$(echo '%s' | base64 -d) && `+
+				`DOLT_PORT=$(echo '%s' | base64 -d) && `+
+				`yes | bd init --server --server-host "$DOLT_HOST" --server-port "$DOLT_PORT" -p "$PREFIX" --skip-hooks --skip-agents`,
+			initDirB64, prefixB64, doltHostB64, doltPortB64,
+		)
+	} else {
+		// City agents: GC_DOLT=skip already created .beads/ at /workspace with
+		// the correct prefix from gc init. Just patch the Dolt server address
+		// so bd connects to the in-cluster service instead of localhost.
+		patchCmd = fmt.Sprintf(
+			`INITDIR=$(echo '%s' | base64 -d) && cd "$INITDIR" && `+
+				`DOLT_HOST=$(echo '%s' | base64 -d) && `+
+				`DOLT_PORT=$(echo '%s' | base64 -d) && `+
+				`if [ -f .beads/metadata.json ] && command -v jq >/dev/null 2>&1; then `+
+				`jq --arg h "$DOLT_HOST" --argjson p "$DOLT_PORT" '.dolt_server_host=$h | .dolt_server_port=$p' .beads/metadata.json > .beads/metadata.json.tmp && `+
+				`mv .beads/metadata.json.tmp .beads/metadata.json; fi`,
+			initDirB64, doltHostB64, doltPortB64,
+		)
 	}
-
-	// Patch the host-side Dolt address in the beads metadata to point at the
-	// in-cluster service. This preserves the correct database name from the
-	// host config while fixing the server address for the pod.
-	//
-	// Build the patch JSON in Go and base64-encode it to avoid shell injection
-	// from environment variables containing shell metacharacters.
-	portNum, err := strconv.Atoi(doltPort)
-	if err != nil {
-		return fmt.Errorf("invalid GC_K8S_DOLT_PORT %q: %w", doltPort, err)
-	}
-	patchJSON, err := json.Marshal(map[string]any{
-		"dolt_server_host": doltHost,
-		"dolt_server_port": portNum,
-	})
-	if err != nil {
-		return fmt.Errorf("marshaling beads patch: %w", err)
-	}
-	patchB64 := base64.StdEncoding.EncodeToString(patchJSON)
-	prefixB64 := base64.StdEncoding.EncodeToString([]byte(prefix.String()))
-	workDirB64 := base64.StdEncoding.EncodeToString([]byte(workDir))
-
-	// The shell command decodes the base64 values, so no user-controlled
-	// content is ever interpreted as shell syntax.
-	patchCmd := fmt.Sprintf(
-		`WD=$(echo '%s' | base64 -d) && cd "$WD" && PATCH=$(echo '%s' | base64 -d) && `+
-			`if [ -f .beads/metadata.json ]; then `+
-			`jq --argjson patch "$PATCH" '. + $patch' .beads/metadata.json > .beads/metadata.json.tmp && `+
-			`mv .beads/metadata.json.tmp .beads/metadata.json; `+
-			`else PREFIX=$(echo '%s' | base64 -d) && `+
-			`DOLT_HOST=$(echo '%s' | base64 -d) && `+
-			`DOLT_PORT=$(echo '%s' | base64 -d) && `+
-			`yes | bd init --server --server-host "$DOLT_HOST" --server-port "$DOLT_PORT" -p "$PREFIX" --skip-hooks --skip-agents; fi`,
-		workDirB64, patchB64, prefixB64,
-		base64.StdEncoding.EncodeToString([]byte(doltHost)),
-		base64.StdEncoding.EncodeToString([]byte(doltPort)),
-	)
-	_, err = ops.execInPod(ctx, podName, "agent",
+	_, initErr := ops.execInPod(ctx, podName, "agent",
 		[]string{"sh", "-c", patchCmd}, nil)
-	return err
+	return initErr
 }
 
 func buildRESTConfig(k8sContext string) (*rest.Config, error) {

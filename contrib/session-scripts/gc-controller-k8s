@@ -212,6 +212,8 @@ case "$op" in
       --arg mem_req "$CTRL_MEM_REQ" \
       --arg cpu_lim "$CTRL_CPU_LIM" \
       --arg mem_lim "$CTRL_MEM_LIM" \
+      --arg dolt_host "$DOLT_HOST" \
+      --arg dolt_port "$DOLT_PORT" \
       --arg prebaked "${GC_K8S_PREBAKED:-false}" \
       '{
         apiVersion: "v1",
@@ -238,6 +240,8 @@ case "$op" in
               {name: "GC_K8S_IMAGE", value: $agent_image},
               {name: "GC_K8S_NAMESPACE", value: $ns},
               {name: "GC_K8S_PREBAKED", value: $prebaked},
+              {name: "GC_K8S_DOLT_HOST", value: $dolt_host},
+              {name: "GC_K8S_DOLT_PORT", value: $dolt_port},
               {name: "GC_K8S_MCP_MAIL_HOST", value: "mcp-mail.gc.svc.cluster.local"},
               {name: "GC_K8S_MCP_MAIL_PORT", value: "8765"},
               {name: "GC_MAIL", value: "exec:gc-mail-mcp-agent-mail"},
