@@ -242,12 +242,17 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir string) []corev1.EnvVar {
 			continue
 		}
 		val := v
-		// Remap GC_CITY and GC_DIR to pod paths.
+		// Remap controller-side city paths to pod-side /workspace paths.
+		ctrlCity := cfgEnv["GC_CITY"]
 		switch k {
 		case "GC_CITY":
 			val = "/workspace"
 		case "GC_DIR":
 			val = podWorkDir
+		case "GC_RIG_ROOT", "BEADS_DIR":
+			if ctrlCity != "" && strings.HasPrefix(val, ctrlCity) {
+				val = "/workspace" + val[len(ctrlCity):]
+			}
 		}
 		env = append(env, corev1.EnvVar{Name: k, Value: val})
 	}
